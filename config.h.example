@@ -1,0 +1,5 @@
+const int CO2_REAL_ZERO = 1400; //change it for new co2 sensor
+
+const char* mqtt_server = "192.168.100.10";
+const char* ssid = "my-home-wifi";
+const char* password = "wifi-password";
