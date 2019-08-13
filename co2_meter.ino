@@ -69,17 +69,21 @@ void loop() {
 
     if (millis() - getDataTimer >= sendDataInterval && co2Ready)                    // Check if interval has elapsed (non-blocking delay() equivilant)
     {
-        int CO2;                                            // Buffer for CO2
+        int CO2RAW;                                            // Buffer for CO2
         int CO2REAL;
+        int CO2DIFF;
 
-        CO2 = myMHZ19.getCO2();                             // Request CO2 (as ppm)
-        CO2REAL = CO2 - (CO2_REAL_ZERO - CO2ZERO);
-        if (CO2REAL <= 0) {
-          CO2REAL = CO2ZERO;
+        CO2RAW = myMHZ19.getCO2();                             // Request CO2 (as ppm)
+        CO2DIFF = CO2RAW - CO2_REAL_ZERO;
+
+        if (CO2DIFF <= 0) {
+            CO2REAL = CO2ZERO;
+        } else {
+            CO2REAL = CO2ZERO + CO2DIFF;
         }
 
         Serial.print("CO2 raw (ppm): ");
-        Serial.println(CO2);
+        Serial.println(CO2RAW);
         Serial.print("CO2 (ppm): ");
         Serial.println(CO2REAL);
 
@@ -93,7 +97,7 @@ void loop() {
         char tempString[8];
         char co2RealString[8];
 
-        dtostrf(CO2, 1, 0, co2String);
+        dtostrf(CO2RAW, 1, 0, co2String);
         dtostrf(CO2REAL, 1, 0, co2RealString);
         dtostrf(Temp, 1, 2, tempString);
 
