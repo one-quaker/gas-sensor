@@ -3,12 +3,14 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <EEPROM.h>
 #include "config.h"
 
 
 #define RX_PIN 16                                          // Rx pin which the MHZ19 Tx pin is attached to
 #define TX_PIN 17                                          // Tx pin which the MHZ19 Rx pin is attached to
 #define BAUDRATE 9600                                      // Native to the sensor (do not change)
+#define EEPROM_SIZE 16
 
 //!!!!! patch PubSubClient.h to MQTT_MAX_PACKET_SIZE 1024  // fix for MQTT client dropping messages over 128B
 
@@ -21,8 +23,13 @@ HardwareSerial mySerial(1);                              // ESP32 Example
 
 const int sendDataInterval = 15000;
 unsigned long getDataTimer = 0;                             // Variable to store timer interval
+const int co2MinSaveInterval = 12 * 60 * 60 * 1000;         // 12 hours
+unsigned long co2MinSaveTimer = 0;
 bool co2Ready = false;
-const int co2PreheatTime = 60 * 3 * 1000;
+const int co2PreheatTime = 3 * 60 * 1000;                   // 3 minutes
+// const int co2PreheatTime = 5000;
+int co2MinVal = 0;
+int co2StoredMinVal = 0;
 
 
 WiFiClient espClient;
@@ -35,6 +42,9 @@ void setup()
     mySerial.begin(BAUDRATE, SERIAL_8N1, RX_PIN, TX_PIN); // ESP32 Example
     myMHZ19.begin(mySerial);                                // *Important, Pass your Stream reference
 
+    EEPROM.begin(EEPROM_SIZE);
+    co2StoredMinVal = EEPROM.read(0);
+
     myMHZ19.autoCalibration(false);                              // Turn auto calibration ON (disable with autoCalibration(false))
 
     setup_wifi();
@@ -46,10 +56,20 @@ void loop() {
     StaticJsonDocument<512> doc;
     char jsonMsg[512];
 
+    int hallVal = hallRead();
+
     if (!client.connected()) {
       reconnect();
     }
     client.loop();
+
+
+    if (millis() - co2MinSaveTimer >= co2MinSaveInterval) {
+        co2MinSaveTimer = millis();
+        Serial.println("EEPROM write");
+        EEPROM.write(0, co2MinVal);
+        EEPROM.commit();
+    }
 
     if (millis() >= co2PreheatTime && !co2Ready) {
       co2Ready = true;
@@ -82,28 +102,33 @@ void loop() {
             CO2REAL = CO2ZERO + CO2DIFF;
         }
 
+        if (co2MinVal == 0) {
+            co2MinVal = CO2RAW;
+        } else if (co2MinVal > CO2RAW) {
+            co2MinVal = CO2RAW;
+        }
+
         Serial.print("CO2 raw (ppm): ");
         Serial.println(CO2RAW);
+        Serial.print("CO2 min (ppm): ");
+        Serial.println(co2MinVal);
         Serial.print("CO2 (ppm): ");
         Serial.println(CO2REAL);
+
+        Serial.print("Hall sensor: ");
+        Serial.println(hallVal);
 
         int8_t Temp;                                         // Buffer for temperature
         Temp = myMHZ19.getTemperature();                     // Request Temperature (as Celsius)
         Serial.print("Temperature (C): ");
         Serial.println(Temp);
 
-
-        char co2String[8];
-        char tempString[8];
-        char co2RealString[8];
-
-        dtostrf(CO2RAW, 1, 0, co2String);
-        dtostrf(CO2REAL, 1, 0, co2RealString);
-        dtostrf(Temp, 1, 2, tempString);
-
-        doc["co2"] = co2RealString;
-        doc["temp"] = tempString;
-        doc["co2_raw"] = co2String;
+        doc["co2"] = CO2REAL;
+        doc["temp"] = Temp;
+        doc["co2_raw"] = CO2RAW;
+        doc["co2_min"] = co2MinVal;
+        doc["co2_stored_min"] = co2StoredMinVal;
+        doc["co2_min_manual"] = CO2_REAL_ZERO;
         doc["mqtt_server"] = mqtt_server;
         doc["wifi_ssid"] = ssid;
         doc["local_ip"] = ipToString(WiFi.localIP());
