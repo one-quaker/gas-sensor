@@ -9,19 +9,23 @@
 
 #define RX_PIN 16                                          // Rx pin which the MHZ19 Tx pin is attached to
 #define TX_PIN 17                                          // Tx pin which the MHZ19 Rx pin is attached to
+#define CO_PIN 34
+
 #define BAUDRATE 9600                                      // Native to the sensor (do not change)
 #define EEPROM_SIZE 512
 
 //!!!!! patch PubSubClient.h to MQTT_MAX_PACKET_SIZE 1024  // fix for MQTT client dropping messages over 128B
 
 const int CO2ZERO = 400;
+const int CO_ALARM_VALUE = 350;
 const char MQTT_PUB_TOPIC[16] = "gas-sensor";
 
 MHZ19 myMHZ19;                                             // Constructor for MH-Z19 class
 HardwareSerial mySerial(1);                              // ESP32 Example
 
 
-const int sendDataInterval = 20000;
+const int sendDataIntervalDefault = 20000;
+int sendDataInterval = sendDataIntervalDefault;
 unsigned long getDataTimer = 0;                             // Variable to store timer interval
 const int co2MinSaveInterval = 12 * 60 * 60 * 1000;         // 12 hours
 unsigned long co2MinSaveTimer = 0;
@@ -64,6 +68,17 @@ void loop() {
     char jsonMsg[512];
 
     int hallVal = hallRead();
+    int coValue = analogRead(CO_PIN);
+
+    if (coValue > CO_ALARM_VALUE) {
+        sendDataInterval = 1000;
+        co2Ready = true;
+        Serial.print("CO ALARM: ");
+        Serial.println(coValue);
+    } else {
+        sendDataInterval = sendDataIntervalDefault;
+        co2Ready = false;
+    }
 
     if (!client.connected()) {
       reconnect();
@@ -119,6 +134,8 @@ void loop() {
         Serial.println(co2MinVal);
         Serial.print("CO2 (ppm): ");
         Serial.println(CO2REAL);
+        Serial.print("CO: ");
+        Serial.println(coValue);
 
         Serial.print("Hall sensor: ");
         Serial.println(hallVal);
@@ -130,6 +147,7 @@ void loop() {
 
         doc["co2"] = CO2REAL;
         doc["temp"] = Temp;
+        doc["co"] = coValue;
         doc["co2_raw"] = CO2RAW;
         doc["co2_min"] = co2MinVal;
         doc["co2_stored_min"] = co2StoredMinVal;
