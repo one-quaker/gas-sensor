@@ -10,7 +10,7 @@
 #define RX_PIN 16                                          // Rx pin which the MHZ19 Tx pin is attached to
 #define TX_PIN 17                                          // Tx pin which the MHZ19 Rx pin is attached to
 #define BAUDRATE 9600                                      // Native to the sensor (do not change)
-#define EEPROM_SIZE 16
+#define EEPROM_SIZE 256
 
 //!!!!! patch PubSubClient.h to MQTT_MAX_PACKET_SIZE 1024  // fix for MQTT client dropping messages over 128B
 
@@ -21,7 +21,7 @@ MHZ19 myMHZ19;                                             // Constructor for MH
 HardwareSerial mySerial(1);                              // ESP32 Example
 
 
-const int sendDataInterval = 15000;
+const int sendDataInterval = 20000;
 unsigned long getDataTimer = 0;                             // Variable to store timer interval
 const int co2MinSaveInterval = 12 * 60 * 60 * 1000;         // 12 hours
 unsigned long co2MinSaveTimer = 0;
@@ -43,7 +43,7 @@ void setup()
     myMHZ19.begin(mySerial);                                // *Important, Pass your Stream reference
 
     EEPROM.begin(EEPROM_SIZE);
-    co2StoredMinVal = EEPROM.read(0);
+    EEPROM.get(0, co2StoredMinVal);
 
     myMHZ19.autoCalibration(false);                              // Turn auto calibration ON (disable with autoCalibration(false))
 
@@ -66,9 +66,7 @@ void loop() {
 
     if (millis() - co2MinSaveTimer >= co2MinSaveInterval) {
         co2MinSaveTimer = millis();
-        Serial.println("EEPROM write");
-        EEPROM.write(0, co2MinVal);
-        EEPROM.commit();
+        saveCo2MinVal();
     }
 
     if (millis() >= co2PreheatTime && !co2Ready) {
@@ -232,4 +230,11 @@ String ipToString(IPAddress ip){
         s += i  ? "." + String(ip[i]) : String(ip[i]);
     }
     return s;
+}
+
+
+void saveCo2MinVal() {
+    Serial.println("EEPROM write");
+    EEPROM.put(0, co2MinVal);
+    EEPROM.get(0, co2StoredMinVal);
 }
