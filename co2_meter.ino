@@ -10,7 +10,7 @@
 #define RX_PIN 16                                          // Rx pin which the MHZ19 Tx pin is attached to
 #define TX_PIN 17                                          // Tx pin which the MHZ19 Rx pin is attached to
 #define BAUDRATE 9600                                      // Native to the sensor (do not change)
-#define EEPROM_SIZE 256
+#define EEPROM_SIZE 512
 
 //!!!!! patch PubSubClient.h to MQTT_MAX_PACKET_SIZE 1024  // fix for MQTT client dropping messages over 128B
 
@@ -28,8 +28,9 @@ unsigned long co2MinSaveTimer = 0;
 bool co2Ready = false;
 const int co2PreheatTime = 3 * 60 * 1000;                   // 3 minutes
 // const int co2PreheatTime = 5000;
-int co2MinVal = 0;
-int co2StoredMinVal = 0;
+
+int co2MinVal;
+int co2StoredMinVal;
 
 
 WiFiClient espClient;
@@ -42,8 +43,14 @@ void setup()
     mySerial.begin(BAUDRATE, SERIAL_8N1, RX_PIN, TX_PIN); // ESP32 Example
     myMHZ19.begin(mySerial);                                // *Important, Pass your Stream reference
 
-    EEPROM.begin(EEPROM_SIZE);
-    EEPROM.get(0, co2StoredMinVal);
+    Serial.println("\nTesting EEPROM Library\n");
+    if (!EEPROM.begin(EEPROM_SIZE)) {
+        Serial.println("Failed to initialise EEPROM");
+        Serial.println("Restarting...");
+        delay(1000);
+        ESP.restart();
+    }
+    co2StoredMinVal = EEPROM.readUInt(0);
 
     myMHZ19.autoCalibration(false);                              // Turn auto calibration ON (disable with autoCalibration(false))
 
@@ -66,7 +73,7 @@ void loop() {
 
     if (millis() - co2MinSaveTimer >= co2MinSaveInterval) {
         co2MinSaveTimer = millis();
-        saveCo2MinVal();
+        co2StoredMinVal = saveCo2Val(co2MinVal);
     }
 
     if (millis() >= co2PreheatTime && !co2Ready) {
@@ -233,8 +240,17 @@ String ipToString(IPAddress ip){
 }
 
 
-void saveCo2MinVal() {
-    Serial.println("EEPROM write");
-    EEPROM.put(0, co2MinVal);
-    EEPROM.get(0, co2StoredMinVal);
+int saveCo2Val(int saveVal) {
+    int curVal;
+    curVal = EEPROM.readUInt(0);
+
+    if (curVal != saveVal) {
+        Serial.println("EEPROM write");
+        EEPROM.writeInt(0, saveVal);
+        EEPROM.commit();
+        return saveVal;
+    } else {
+        Serial.println("EEPROM skip write, value is not changed");
+        return curVal;
+    }
 }
