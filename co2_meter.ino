@@ -10,6 +10,7 @@
 #define RX_PIN 16                                          // Rx pin which the MHZ19 Tx pin is attached to
 #define TX_PIN 17                                          // Tx pin which the MHZ19 Rx pin is attached to
 #define CO_PIN 34
+#define MODE_PIN 35
 
 #define BAUDRATE 9600                                      // Native to the sensor (do not change)
 #define EEPROM_SIZE 512
@@ -35,17 +36,25 @@ const int co2PreheatTime = 3 * 60 * 1000;                   // 3 minutes
 
 int co2MinVal;
 int co2StoredMinVal;
+int modeValue;
+
+
+bool wifiActive = false;
+bool mqttActive = false;
 
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
 
-void setup()
-{
+void setup() {
     Serial.begin(9600);                                     // For ESP32 baudarte is 115200 etc.
     mySerial.begin(BAUDRATE, SERIAL_8N1, RX_PIN, TX_PIN); // ESP32 Example
     myMHZ19.begin(mySerial);                                // *Important, Pass your Stream reference
+
+    pinMode(CO_PIN, INPUT);
+    pinMode(MODE_PIN, INPUT);
+    modeValue = digitalRead(MODE_PIN);
 
     Serial.println("\nTesting EEPROM Library\n");
     if (!EEPROM.begin(EEPROM_SIZE)) {
@@ -57,10 +66,6 @@ void setup()
     co2StoredMinVal = EEPROM.readUInt(0);
 
     myMHZ19.autoCalibration(false);                              // Turn auto calibration ON (disable with autoCalibration(false))
-
-    setup_wifi();
-    client.setServer(mqtt_server, 1883);
-    client.setCallback(callback);
 }
 
 void loop() {
@@ -69,6 +74,8 @@ void loop() {
 
     int hallVal = hallRead();
     int coValue = analogRead(CO_PIN);
+
+    setupNetwork();
 
     if (coValue > CO_ALARM_VALUE) {
         sendDataInterval = 1000;
@@ -84,7 +91,6 @@ void loop() {
       reconnect();
     }
     client.loop();
-
 
     if (millis() - co2MinSaveTimer >= co2MinSaveInterval) {
         co2MinSaveTimer = millis();
@@ -154,6 +160,7 @@ void loop() {
         doc["co2_min_manual"] = CO2_REAL_ZERO;
         doc["mqtt_server"] = mqtt_server;
         doc["wifi_ssid"] = ssid;
+        doc["wifi_mode"] = modeValue;
         doc["local_ip"] = ipToString(WiFi.localIP());
         doc["uptime"] = millis();
         serializeJson(doc, jsonMsg);
@@ -182,7 +189,15 @@ void loop() {
 }
 
 
-void setup_wifi() {
+void mcu_restart(char msg[32], int delayTimer = 3000) {
+    Serial.println(msg);
+    delay(delayTimer);
+    ESP.restart();
+}
+
+
+bool setup_wifi(const char* ssid, const char* password) {
+    int connectCount = 0;
     delay(10);
     // We start by connecting to a WiFi network
     Serial.println();
@@ -191,16 +206,27 @@ void setup_wifi() {
 
     WiFi.begin(ssid, password);
 
-    while (WiFi.status() != WL_CONNECTED) {
+    while (connectCount <= 20) {
         delay(500);
         Serial.print(".");
+        connectCount++;
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("");
+            Serial.println("WiFi connected");
+            Serial.println("IP address: ");
+            Serial.println(WiFi.localIP());
+            return true;
+        }
     }
-
-    Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
+    mcu_restart("Wifi connect fail, MCU restart...");
 }
+
+
+void setup_mqtt(const char* host, const int port) {
+    client.setServer(host, 1883);
+    client.setCallback(callback);
+}
+
 
 void callback(char* topic, byte* message, unsigned int length) {
     Serial.print("Message arrived on topic: ");
@@ -229,22 +255,44 @@ void callback(char* topic, byte* message, unsigned int length) {
     }
 }
 
-void reconnect() {
+bool reconnect() {
+    int connectCount = 0;
     // Loop until we're reconnected
-    while (!client.connected()) {
+    while (connectCount <= 5) {
         Serial.print("Attempting MQTT connection...");
         // Attempt to connect
         if (client.connect("ESPClient")) {
             Serial.println("connected");
             // Subscribe
             // client.subscribe("esp32/output");
+            return true;
         } else {
             Serial.print("failed, rc=");
             Serial.print(client.state());
             Serial.println(" try again in 5 seconds");
             // Wait 5 seconds before retrying
+            connectCount++;
             delay(5000);
         }
+    }
+    mcu_restart("MQTT reconnect fail, MCU restart...");
+}
+
+
+void setupNetwork() {
+    if (!wifiActive & !mqttActive & modeValue == 1) {
+        ssid = ssid2;
+        password = password2;
+        mqtt_server = mqtt_server2;
+    }
+
+    if (!wifiActive) {
+        setup_wifi(ssid, password);
+        wifiActive = true;
+    }
+    if (wifiActive & !mqttActive) {
+        setup_mqtt(mqtt_server, 1883);
+        mqttActive = true;
     }
 }
 
